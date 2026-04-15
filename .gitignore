@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Rust build artifacts
+target/
+
+# Generated font bundle (run download-fonts.mjs to create)
+src/fonts/
+src/fonts.css
