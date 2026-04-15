@@ -1,0 +1,17 @@
+{
+  "name": "taskpad",
+  "version": "0.1.0",
+  "description": "Taskpad tray app - Tauri v2 system tray panel with Cloudflare Worker sync",
+  "private": true,
+  "scripts": {
+    "dev":   "tauri dev",
+    "build": "tauri build",
+    "test":  "node tests/run-sync-core.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  }
+}

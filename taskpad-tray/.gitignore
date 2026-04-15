@@ -1,0 +1,9 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+src/*.bak
+src/*.bak2
+src-tauri/src/*.bak
+src-tauri/src/*.bak2
+src/fonts/
+src/fonts.css
