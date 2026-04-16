@@ -1,5 +1,5 @@
-Continue = 'Stop'
- = 
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
 
 Write-Host 'Checking shared app runtimes...'
 node --check (Join-Path  'taskpad-tray\src\app.js')

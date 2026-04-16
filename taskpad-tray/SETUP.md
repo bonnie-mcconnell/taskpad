@@ -1,4 +1,4 @@
-# Taskpad - Windows Tray App (Step 3)
+# Taskpad - Windows Tray App
 
 ## What this does
 
@@ -136,9 +136,3 @@ position between launches and restores it on open.
 -> Run `node download-fonts.mjs` once. That writes `src/fonts/` and
    `src/fonts.css`, which the tray app will automatically use instead of the
    Google Fonts URL when those files are present.
-
----
-
-## Next step
-
-Step 4: Android floating overlay APK.
