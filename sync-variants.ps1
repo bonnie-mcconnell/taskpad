@@ -49,7 +49,7 @@ $webApp = $webApp.Replace($oldWebDrag, $newWebDrag)
 $webApp = $webApp.Replace('    if (isAndroid && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {')
 $webApp = $webApp.Replace('    if (isAndroid && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && !localStorage.getItem(SWIPE_SHOWN)) {')
 $webApp = $webApp.Replace('    li.classList.toggle(''reorderable'', !checked && !isAndroid);', '    li.classList.toggle(''reorderable'', !checked && !isAndroid && !isMobile);')
-$webApp = $webApp.Replace('  if (isAndroid) {' + $nl + '    footerHint.textContent = `tap text to edit · tap ${SYMBOLS.must} to reprioritise · swipe to delete`;', '  if (isAndroid || isMobile) {' + $nl + '    footerHint.textContent = `tap text to edit · tap ${SYMBOLS.must} to reprioritise · swipe to delete`;')
+$webApp = $webApp.Replace('  if (isAndroid) {' + $nl + "    footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';", '  if (isAndroid || isMobile) {' + $nl + "    footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';")
 Write-Utf8NoBom $webAppPath $webApp
 
 Write-Host 'Patching web shell...'

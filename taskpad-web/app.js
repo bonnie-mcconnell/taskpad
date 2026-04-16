@@ -1544,7 +1544,7 @@ import {
 
   // ─── Platform footer hint ─────────────────────────────────────────────────
   // Swipe hint is only valid on Android. All other contexts get the desktop hint.
-  if (isAndroid) {
+  if (isAndroid || isMobile) {
     footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';
   } else {
     swipeHint.remove();

@@ -48,5 +48,5 @@ Set your worker URL there:
 ```
 
 ## Notes
-- This project does not include a checked-in Gradle wrapper. Android Studio will provision one automatically when you open the project. If you want to build from the command line without Android Studio, run `gradle wrapper` once inside the `taskpad-android` folder first (requires Gradle installed globally).
-- The simplest path is to open the folder in Android Studio and let it provision the Android toolchain.
+- A Gradle wrapper is included (`gradlew` / `gradlew.bat`). You can build from the command line without opening Android Studio.
+- The simplest path is still to open the folder in Android Studio, which handles SDK provisioning automatically.
