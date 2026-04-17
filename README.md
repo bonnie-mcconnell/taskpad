@@ -2,7 +2,9 @@
 
 A notebook-style task list I built because every todo app I tried was either too heavy to have open all day or too basic to actually organise anything. Lives in the Windows system tray (one click away from any app), works as a PWA on mobile, and has an Android wrapper - all running the same frontend, synced through a Cloudflare Worker you deploy yourself.
 
-<!screenshot TODO>
+<img width="1920" height="1080" alt="Screenshot (1611)" src="https://github.com/user-attachments/assets/332c30ad-4912-4953-a801-a77e735d979c" />
+<img width="1920" height="1080" alt="Screenshot (1613)" src="https://github.com/user-attachments/assets/2af8603f-7889-49e8-9865-dd9f44521926" />
+
 
 ## What it does
 
