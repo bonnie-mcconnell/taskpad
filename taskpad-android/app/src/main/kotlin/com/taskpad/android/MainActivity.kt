@@ -26,7 +26,13 @@ class MainActivity : ComponentActivity() {
       settings.allowFileAccess = true
       settings.allowContentAccess = true
       settings.allowFileAccessFromFileURLs = true
-      // Required: the WebView loads from file:// assets and needs to fetch the sync Worker over HTTPS
+      // allowUniversalAccessFromFileURLs allows the file:// WebView to make cross-origin
+      // requests - specifically, to fetch the Cloudflare sync Worker over HTTPS.
+      // This is a known security footgun in general (it breaks same-origin policy), but
+      // is acceptable here because: (a) this is a personal app with no third-party content,
+      // (b) the WebView only loads assets from app-bundled files, and (c) there is no
+      // user-supplied URL that could be injected. If this app ever loads remote content,
+      // remove this setting and proxy sync calls through a native Kotlin bridge instead.
       settings.allowUniversalAccessFromFileURLs = true
       settings.cacheMode = WebSettings.LOAD_DEFAULT
       settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE

@@ -1,4 +1,7 @@
-export const WORKER_URL_FALLBACK = 'https://taskpad-sync.taskpad-sync.workers.dev';
+// WORKER_URL_FALLBACK is intentionally empty.
+// Each deployment needs its own Cloudflare Worker - see SETUP.md / DEPLOY.md.
+// There is no shared default endpoint.
+export const WORKER_URL_FALLBACK = '';
 
 export class SyncHttpError extends Error {
   constructor(message, status) {

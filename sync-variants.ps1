@@ -17,6 +17,16 @@ function Load-Text {
   [System.IO.File]::ReadAllText($Path, $encoding)
 }
 
+# Assert-Patched: verifies that a string replacement actually changed the content.
+# Throws immediately if the old string was not found - prevents silent patch failures
+# when the tray source changes and a patch target no longer matches.
+function Assert-Patched {
+  param([string]$Before, [string]$After, [string]$PatchName)
+  if ($Before -eq $After) {
+    throw "Patch '$PatchName' did not match - the tray source may have changed. Update sync-variants.ps1 to match."
+  }
+}
+
 Write-Host 'Syncing shared runtime from tray...'
 Copy-Item -LiteralPath (Join-Path $traySrc 'app.js') -Destination (Join-Path $webRoot 'app.js') -Force
 Copy-Item -LiteralPath (Join-Path $traySrc 'app\sync-core.mjs') -Destination (Join-Path $webRoot 'app\sync-core.mjs') -Force
@@ -28,7 +38,9 @@ Copy-Item -LiteralPath (Join-Path $traySrc 'index.html') -Destination (Join-Path
 Write-Host 'Patching web runtime behavior...'
 $webAppPath = Join-Path $webRoot 'app.js'
 $webApp = Load-Text $webAppPath
+$before = $webApp
 $webApp = $webApp.Replace('    li.classList.toggle(''reorderable'', !task.done && !isAndroid);', '    li.classList.toggle(''reorderable'', !task.done && !isAndroid && !isMobile);')
+Assert-Patched $before $webApp 'web: reorderable-toggleDone'
 $oldWebDrag = @(
   '    // Drag and drop - desktop-only (mouse events, not touch/pointer)',
   '    if (!task.done && !isAndroid) {',
@@ -45,11 +57,21 @@ $newWebDrag = @(
   '    // Swipe-to-delete: Android and mobile web browsers',
   '    if (isAndroid || isMobile) setupSwipe(li, task.id);'
 ) -join $nl
+$before = $webApp
 $webApp = $webApp.Replace($oldWebDrag, $newWebDrag)
+Assert-Patched $before $webApp 'web: drag setup block'
+$before = $webApp
 $webApp = $webApp.Replace('    if (isAndroid && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {')
+Assert-Patched $before $webApp 'web: swipe hint render()'
+$before = $webApp
 $webApp = $webApp.Replace('    if (isAndroid && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && !localStorage.getItem(SWIPE_SHOWN)) {')
+Assert-Patched $before $webApp 'web: swipe hint addTask()'
+$before = $webApp
 $webApp = $webApp.Replace('    li.classList.toggle(''reorderable'', !checked && !isAndroid);', '    li.classList.toggle(''reorderable'', !checked && !isAndroid && !isMobile);')
+Assert-Patched $before $webApp 'web: reorderable-toggleDone2'
+$before = $webApp
 $webApp = $webApp.Replace('  if (isAndroid) {' + $nl + "    footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';", '  if (isAndroid || isMobile) {' + $nl + "    footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';")
+Assert-Patched $before $webApp 'web: footer hint'
 Write-Utf8NoBom $webAppPath $webApp
 
 Write-Host 'Patching web shell...'

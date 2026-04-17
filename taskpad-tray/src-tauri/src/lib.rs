@@ -166,15 +166,19 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 }
 
 fn rebuild_tray_menu<R: Runtime>(app: &AppHandle<R>, autostart_on: bool) {
-    if let Some(tray) = app.tray_by_id("") {
-        if let Ok(open)  = MenuItem::with_id(app, "open",  "Open",                        true, None::<&str>) {
-        if let Ok(start) = MenuItem::with_id(app, "start", autostart_label(autostart_on), true, None::<&str>) {
-        if let Ok(sep)   = tauri::menu::PredefinedMenuItem::separator(app) {
-        if let Ok(quit)  = MenuItem::with_id(app, "quit",  "Quit Taskpad",                true, None::<&str>) {
-        if let Ok(menu)  = Menu::with_items(app, &[&open, &start, &sep, &quit]) {
-            let _ = tray.set_menu(Some(menu));
-        }}}}}
-    }
+    // Build and set the tray menu, ignoring errors - if any menu item fails to
+    // construct (which should not happen in practice), the existing menu stays in place.
+    let Some(tray) = app.tray_by_id("") else { return };
+    let _ = build_tray_menu_items(app, autostart_on)
+        .and_then(|menu| tray.set_menu(Some(menu)));
+}
+
+fn build_tray_menu_items<R: Runtime>(app: &AppHandle<R>, autostart_on: bool) -> tauri::Result<Menu<R>> {
+    let open  = MenuItem::with_id(app, "open",  "Open",                        true, None::<&str>)?;
+    let start = MenuItem::with_id(app, "start", autostart_label(autostart_on), true, None::<&str>)?;
+    let sep   = tauri::menu::PredefinedMenuItem::separator(app)?;
+    let quit  = MenuItem::with_id(app, "quit",  "Quit Taskpad",                true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &start, &sep, &quit])
 }
 
 // ─── Panel toggle ─────────────────────────────────────────────────────────────

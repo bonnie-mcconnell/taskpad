@@ -1,7 +1,7 @@
 {
   "name": "Taskpad",
   "short_name": "Taskpad",
-  "description": "Must \u00b7 Should \u00b7 Could \u2014 a focused daily task list",
+  "description": "Must · Should · Could - a focused daily task list",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fdf6ec",
@@ -12,13 +12,25 @@
       "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

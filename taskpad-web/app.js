@@ -136,8 +136,6 @@ import {
   }
 
   // ─── Sync ────────────────────────────────────────────────────────────────
-  // Fallback URL used if config.json is missing or unreadable (e.g. first launch,
-  // WebView2 asset fetch failure). Keeps the app functional without config.json.
 
   async function loadRuntimeConfig() {
     let configuredUrl = '';
@@ -154,8 +152,9 @@ import {
         }
       } catch {}
     }
-    // Fall back to the known URL rather than leaving workerUrl empty, which would
-    // silently drop the user into local-only mode with no way to enter a sync key.
+    // resolveWorkerUrl trims the URL and strips trailing slashes.
+    // If no URL was found in localStorage or config.json, workerUrl stays ''
+    // and the app runs in local-only mode (sync UI is hidden).
     workerUrl = resolveWorkerUrl(configuredUrl);
   }
 
@@ -830,12 +829,12 @@ import {
     span.addEventListener('touchend', () => clearTimeout(pressTimer));
     span.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true });
 
-    // Drag and drop - desktop-only (mouse events, not touch/pointer)
-    if (!task.done && !isAndroid) {
+    // Drag and drop - desktop browsers only (not mobile/Android)
+    if (!task.done && !isAndroid && !isMobile) {
       setupDrag(li, task.id);
     }
-    // Swipe-to-delete: Android only
-    if (isAndroid) setupSwipe(li, task.id);
+    // Swipe-to-delete: Android and mobile web browsers
+    if (isAndroid || isMobile) setupSwipe(li, task.id);
 
     return li;
   }

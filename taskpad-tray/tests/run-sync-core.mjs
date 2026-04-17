@@ -14,8 +14,10 @@ import {
 } from '../src/app/sync-core.mjs';
 
 async function main() {
+  // WORKER_URL_FALLBACK is intentionally empty - no shared default endpoint
+  assert.equal(WORKER_URL_FALLBACK, '');
   assert.equal(resolveWorkerUrl(' https://example.com/// '), 'https://example.com');
-  assert.equal(resolveWorkerUrl(''), WORKER_URL_FALLBACK);
+  assert.equal(resolveWorkerUrl(''), '');
 
   assert.equal(
     normalizeSyncKey('  ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789  '),
@@ -26,6 +28,7 @@ async function main() {
   assert.equal(isValidSyncKey('A'.repeat(64)), true);
   assert.equal(isValidSyncKey('g'.repeat(64)), false);
   assert.equal(isValidSyncKey('a'.repeat(63)), false);
+  assert.equal(isValidSyncKey('a'.repeat(65)), false);
 
   assert.equal(
     describeSyncError(new SyncHttpError('Key not found - call /tasks/init first', 404), 'fallback'),

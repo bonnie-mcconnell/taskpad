@@ -136,8 +136,6 @@ import {
   }
 
   // ─── Sync ────────────────────────────────────────────────────────────────
-  // Fallback URL used if config.json is missing or unreadable (e.g. first launch,
-  // WebView2 asset fetch failure). Keeps the app functional without config.json.
 
   async function loadRuntimeConfig() {
     let configuredUrl = '';
@@ -154,8 +152,9 @@ import {
         }
       } catch {}
     }
-    // Fall back to the known URL rather than leaving workerUrl empty, which would
-    // silently drop the user into local-only mode with no way to enter a sync key.
+    // resolveWorkerUrl trims the URL and strips trailing slashes.
+    // If no URL was found in localStorage or config.json, workerUrl stays ''
+    // and the app runs in local-only mode (sync UI is hidden).
     workerUrl = resolveWorkerUrl(configuredUrl);
   }
 

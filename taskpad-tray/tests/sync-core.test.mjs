@@ -14,9 +14,17 @@ import {
   resolveWorkerUrl,
 } from '../src/app/sync-core.mjs';
 
+test('WORKER_URL_FALLBACK is empty - no shared default endpoint', () => {
+  assert.equal(WORKER_URL_FALLBACK, '');
+});
+
 test('resolveWorkerUrl trims and removes trailing slashes', () => {
   assert.equal(resolveWorkerUrl(' https://example.com/// '), 'https://example.com');
-  assert.equal(resolveWorkerUrl(''), WORKER_URL_FALLBACK);
+});
+
+test('resolveWorkerUrl returns empty string when no URL is configured', () => {
+  assert.equal(resolveWorkerUrl(''), '');
+  assert.equal(resolveWorkerUrl('  '), '');
 });
 
 test('normalizeSyncKey lowercases and trims input', () => {
@@ -31,6 +39,7 @@ test('isValidSyncKey accepts only 64-char hex keys', () => {
   assert.equal(isValidSyncKey('A'.repeat(64)), true);
   assert.equal(isValidSyncKey('g'.repeat(64)), false);
   assert.equal(isValidSyncKey('a'.repeat(63)), false);
+  assert.equal(isValidSyncKey('a'.repeat(65)), false);
 });
 
 test('describeSyncError preserves useful HTTP error messages', () => {
@@ -44,17 +53,45 @@ test('describeSyncError preserves useful HTTP error messages', () => {
   );
 });
 
+test('describeSyncError handles timeout and network errors', () => {
+  const timeout = Object.assign(new Error(), { name: 'TimeoutError' });
+  assert.equal(
+    describeSyncError(timeout, 'fallback'),
+    'The sync server took too long to respond.',
+  );
+  assert.equal(
+    describeSyncError(new TypeError('Failed to fetch'), 'fallback'),
+    'Could not reach the sync server. Check your internet connection.',
+  );
+});
+
 test('isSavedKeyFailure only flags auth/not-found failures', () => {
   assert.equal(isSavedKeyFailure(new SyncHttpError('missing', 404)), true);
   assert.equal(isSavedKeyFailure(new SyncHttpError('denied', 403)), true);
+  assert.equal(isSavedKeyFailure(new SyncHttpError('denied', 401)), true);
   assert.equal(isSavedKeyFailure(new SyncHttpError('server error', 500)), false);
+  assert.equal(isSavedKeyFailure(new Error('network')), false);
 });
 
-test('getSyncStatusMeta returns click-focused sync status copy', () => {
+test('getSyncStatusMeta returns correct copy for known statuses', () => {
   assert.deepEqual(getSyncStatusMeta('synced'), {
     label: 'synced',
     title: 'Click to change sync settings',
   });
+  assert.deepEqual(getSyncStatusMeta('local'), {
+    label: 'local',
+    title: 'Click to configure sync',
+  });
+  assert.deepEqual(getSyncStatusMeta('error'), {
+    label: 'sync error',
+    title: 'Sync failed. Click to check your sync settings.',
+  });
+});
+
+test('getSyncStatusMeta returns passthrough label for unknown status', () => {
+  const result = getSyncStatusMeta('some-unknown-state');
+  assert.equal(result.label, 'some-unknown-state');
+  assert.equal(result.title, 'Click to configure sync');
 });
 
 test('buildSavedKeyFailureMessage wraps the rendered sync error', () => {
@@ -72,6 +109,15 @@ test('readResponseErrorMessage prefers JSON error bodies', async () => {
   assert.equal(await readResponseErrorMessage(response), 'Key not found');
 });
 
+test('readResponseErrorMessage accepts JSON message field as fallback', async () => {
+  const response = new Response(JSON.stringify({ message: 'Rate limited' }), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  assert.equal(await readResponseErrorMessage(response), 'Rate limited');
+});
+
 test('readResponseErrorMessage falls back to status text', async () => {
   const response = new Response('', {
     status: 503,
@@ -79,4 +125,13 @@ test('readResponseErrorMessage falls back to status text', async () => {
   });
 
   assert.equal(await readResponseErrorMessage(response), '503 Service Unavailable');
+});
+
+test('readResponseErrorMessage falls back to plain text body', async () => {
+  const response = new Response('Worker crashed', {
+    status: 500,
+    statusText: '',
+  });
+
+  assert.equal(await readResponseErrorMessage(response), 'Worker crashed');
 });

@@ -58,11 +58,11 @@ taskpad-tray/
 Edit:
 ```json
 {
-  "workerUrl": "https://taskpad-sync.yourname.workers.dev"
+  "workerUrl": "https://your-worker.workers.dev"
 }
 ```
-If you use a custom sync domain instead of `*.workers.dev`, update
-`connect-src` in `src-tauri/tauri.conf.json` as well.
+Leave it empty (`""`) to run without sync. If you use a custom domain instead of
+`*.workers.dev`, also update `connect-src` in `src-tauri/tauri.conf.json`.
 
 ### 3. Install npm dependencies
 ```powershell
@@ -81,8 +81,8 @@ the panel. The tray icon appears. Test everything works.
 ```powershell
 npm test
 ```
-This runs the sync/onboarding regression checks for the existing-key flow and
-related sync helpers.
+This runs the sync regression tests for key validation, error classification,
+conflict handling helpers, and the Worker URL resolver.
 
 ### 6. Build for production
 ```powershell
