@@ -18,6 +18,7 @@ import {
 
   // ─── Constants ───────────────────────────────────────────────────────────
   const CONFIG_PATH    = 'config.json';
+  const CONFIG_LOCAL_PATH = 'config.local.json';
   const STORAGE_KEY    = 'taskpad_v2';
   const SYNC_KEY_STORE = 'taskpad_sync_key';
   const SYNC_META_KEY  = 'taskpad_sync_meta';
@@ -145,14 +146,24 @@ import {
       const localOverride = localStorage.getItem('taskpad_worker_url');
       if (localOverride) configuredUrl = localOverride;
     } catch {}
-    if (!configuredUrl) {
+    if (!configuredUrl && isAndroid) {
       try {
-        const res = await fetch(CONFIG_PATH, { cache: 'no-store' });
-        if (res.ok) {
-          const config = await res.json();
-          if (typeof config.workerUrl === 'string') configuredUrl = config.workerUrl;
-        }
+        const androidUrl = window.TaskpadAndroid.getWorkerUrl();
+        if (androidUrl) configuredUrl = androidUrl;
       } catch {}
+    }
+    if (!configuredUrl) {
+      for (const configPath of [CONFIG_LOCAL_PATH, CONFIG_PATH]) {
+        try {
+          const res = await fetch(configPath, { cache: 'no-store' });
+          if (!res.ok) continue;
+          const config = await res.json();
+          if (typeof config.workerUrl === 'string') {
+            configuredUrl = config.workerUrl;
+            break;
+          }
+        } catch {}
+      }
     }
     // Fall back to the known URL rather than leaving workerUrl empty, which would
     // silently drop the user into local-only mode with no way to enter a sync key.

@@ -3,6 +3,19 @@ plugins {
   id("org.jetbrains.kotlin.android")
 }
 
+val syncTaskpadAssets by tasks.registering(Copy::class) {
+  val sourceDir = layout.projectDirectory.dir("../src")
+  val outputDir = layout.projectDirectory.dir("src/main/assets/taskpad")
+
+  from(sourceDir)
+  into(outputDir)
+  includeEmptyDirs = true
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+  dependsOn(syncTaskpadAssets)
+}
+
 android {
   namespace = "com.taskpad.android"
   compileSdk = 35

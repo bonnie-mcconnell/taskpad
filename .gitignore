@@ -9,6 +9,9 @@ Thumbs.db
 # Node
 node_modules/
 
+# Local private runtime config
+**/config.local.json
+
 # Rust build artifacts
 target/
 

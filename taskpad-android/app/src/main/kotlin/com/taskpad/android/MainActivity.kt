@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
   private lateinit var webView: WebView
@@ -71,6 +72,20 @@ class MainActivity : ComponentActivity() {
   }
 
   inner class TaskpadAndroidBridge {
+    @JavascriptInterface
+    fun getWorkerUrl(): String {
+      for (path in listOf("taskpad/config.local.json", "taskpad/config.json")) {
+        try {
+          val raw = assets.open(path).bufferedReader().use { it.readText() }
+          val workerUrl = JSONObject(raw).optString("workerUrl", "")
+          if (workerUrl.isNotBlank()) return workerUrl
+        } catch (_: Exception) {
+          // Try the next config source.
+        }
+      }
+      return ""
+    }
+
     @JavascriptInterface
     fun onStateChanged(stateJson: String) {
       prefs.edit().putString("latest_state", stateJson).apply()
