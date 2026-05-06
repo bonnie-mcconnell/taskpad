@@ -27,8 +27,15 @@ Quick start (tray app):
 cd taskpad-tray
 npm install
 npm test
+npm run test:e2e
 npm run build
 ```
+
+## Quality
+
+- Shared ordering logic lives in `taskpad-tray/src/app/ordering-core.mjs` and is mirrored into the other runtime variants.
+- Browser smoke tests cover drag reorder and touch delete flows.
+- Set `localStorage.taskpad_perf = '1'` in the browser console to log slow render and drag operations.
 
 ## Sync
 

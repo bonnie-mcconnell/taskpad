@@ -32,6 +32,8 @@ Before opening it in Android Studio:
 - run `powershell -ExecutionPolicy Bypass -File .\taskpad-android\build-android.ps1`
 - open `taskpad-android/` in Android Studio and build/run the `app` module
 
+Before sharing an APK, run through [ANDROID-QA.md](ANDROID-QA.md).
+
 ## Shared verification
 From the repo root:
 ```powershell

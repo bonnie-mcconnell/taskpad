@@ -6,10 +6,14 @@
   "scripts": {
     "dev":   "tauri dev",
     "build": "tauri build",
-    "test":  "node tests/run-sync-core.mjs"
+    "lint": "node --check src/app.js && node --check src/app/sync-core.mjs && node --check src/app/ordering-core.mjs",
+    "test":  "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test --config=playwright.config.mjs",
+    "test:all": "npm test; npm run test:e2e"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "@playwright/test": "^1.54.1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"
