@@ -49,7 +49,7 @@ $webApp = $webApp.Replace($oldWebDrag, $newWebDrag)
 $webApp = $webApp.Replace('    if (isAndroid && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {')
 $webApp = $webApp.Replace('    if (isAndroid && !localStorage.getItem(SWIPE_SHOWN)) {', '    if ((isAndroid || isMobile) && !localStorage.getItem(SWIPE_SHOWN)) {')
 $webApp = $webApp.Replace('    li.classList.toggle(''reorderable'', !checked && !isAndroid);', '    li.classList.toggle(''reorderable'', !checked && !isAndroid && !isMobile);')
-$webApp = [regex]::Replace($webApp, "(?m)^  if \(isAndroid\) \{\r?\n(?=    footerHint\.textContent = 'tap text to edit)", "  if (isAndroid || isMobile) {${nl}", 1)
+$webApp = [regex]::Replace($webApp, "(?m)^  if \(isAndroid\) \{\r?\n(?=    footerHint\.textContent = ')", "  if (isAndroid || isMobile) {${nl}", 1)
 Write-Utf8NoBom $webAppPath $webApp
 
 Write-Host 'Patching web shell...'

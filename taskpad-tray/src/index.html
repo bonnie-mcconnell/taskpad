@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#fdf6ec">
-  <!-- manifest and apple-touch-icon are web/PWA only - not present in tray build -->
   <title>Taskpad</title>
   <!--
     Fonts: run `node download-fonts.mjs` once to bundle fonts locally (offline use).
@@ -299,6 +298,10 @@
       opacity: 0.18;
       transform: scale(0.985);
       transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+    .task-item.touch-primed {
+      transform: scale(0.998);
+      filter: saturate(1.04);
     }
     .task-item.drag-placeholder {
       opacity: 0.28;
@@ -996,12 +999,16 @@
     html.tauri-panel .section-header,
     html.tauri-panel .add-priority { user-select: none; -webkit-user-select: none; }
   </style>
+  <style>
+    .sr-only { position: absolute !important; height: 1px; width: 1px; overflow: hidden; clip: rect(1px,1px,1px,1px); white-space: nowrap; }
+  </style>
 </head>
 <body>
 
+<div id="a11yLive" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
 <div class="setup-screen" id="setupScreen" style="display:none">
   <div class="setup-card">
-    <!-- Binding strip matches the app -->
     <div class="binding" id="setupBinding"></div>
     <div class="setup-ruled">
       <div class="setup-title">Taskpad</div>
@@ -1015,7 +1022,6 @@
         <button class="key-copy-btn" id="keyCopyBtn" type="button">copy to clipboard</button>
       </div>
 
-      <!-- Two-card action row -->
       <div class="setup-actions">
         <button class="setup-action-card" id="setupCreateBtn" type="button">
           <span class="setup-action-title">New list</span>
@@ -1047,6 +1053,7 @@
   <div class="header">
     <div class="header-row">
       <h1 class="header-title">Taskpad</h1>
+      <button class="header-undo" id="headerUndoBtn" title="Undo (Ctrl+Z)" style="margin-left:8px;display:none">Undo</button>
       <span class="header-date" id="headerDate"></span>
     </div>
     <div class="progress-wrap" id="progressWrap" style="display:none">

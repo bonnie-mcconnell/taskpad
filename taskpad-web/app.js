@@ -9,14 +9,18 @@ import {
   readResponseErrorMessage,
   resolveWorkerUrl,
 } from './app/sync-core.mjs';
+import {
+  applyDropOrdering,
+  moveWithinPriority,
+} from './app/ordering-core.mjs';
 
 (() => {
   'use strict';
 
-  // ─── Config ──────────────────────────────────────────────────────────────
+  // Config
   let workerUrl = '';
 
-  // ─── Constants ───────────────────────────────────────────────────────────
+  // Constants
   const CONFIG_PATH    = 'config.json';
   const CONFIG_LOCAL_PATH = 'config.local.json';
   const STORAGE_KEY    = 'taskpad_v2';
@@ -26,10 +30,123 @@ import {
   const SWIPE_SHOWN    = 'taskpad_swipe_shown'; // used only on Android/mobile web
   const MUST_CAP       = 3;
   const PRIORITIES     = ['must', 'should', 'could'];
+  const TOUCH_MOVE_CANCEL_PX = 10;
+  const TOUCH_EDIT_DOUBLE_TAP_MS = 320;
+  const SWIPE_AXIS_THRESHOLD_PX = 12;
+  const SWIPE_HORIZONTAL_DOMINANCE = 1.45;
+  const SWIPE_DELETE_RATIO = 0.55;
+  const PERF_ENABLED = localStorage.getItem('taskpad_perf') === '1';
+
+  const LOCALE_KEY = 'taskpad_locale';
+  const STRINGS = {
+    en: {
+      connectExistingList: 'Connect existing list',
+      pasteSyncKey: 'Paste your 64-character sync key',
+      localOnly: 'Local only',
+      skipForNow: 'skip for now',
+      setupNewListTitle: 'New list',
+      setupNewListDesc: 'First time. Create a new list with a sync key.',
+      creating: 'Creating...',
+      connecting: 'Connecting...',
+      done: 'Done',
+      keySaved: 'Key shown above. Save it, then click here.',
+      copyToClipboard: 'copy to clipboard',
+      copied: 'copied!',
+      selectKeyText: 'select the key text above',
+      confirm: 'Confirm',
+      cancel: 'Cancel',
+      overwrite: 'Overwrite',
+      keepRemote: 'Keep remote',
+      connect: 'Connect',
+      replaceLocalTasksTitle: 'Replace local tasks',
+      replaceLocalTasksMessage: 'Connecting will replace the tasks currently stored in this app with the remote list for this key.',
+      keyMustBe64Hex: 'Key must be 64 hex characters.',
+      noWorkerConfigured: 'No worker URL configured.',
+      createListError: 'Could not create a new synced list.',
+      connectListError: 'Unable to connect this device to that list.',
+      clearDone: 'clear done',
+      clearDoneTitle: 'Clear done',
+      clearDoneMessage: 'Clear all completed tasks from this list?',
+      clearDoneLabel: 'Clear done',
+      keepThem: 'Keep them',
+      clearAll: 'clear all',
+      clearAllTitle: 'Clear all tasks',
+      clearAllMessage: 'Clear every task from this list? This cannot be undone.',
+      clearAllLabel: 'Clear all',
+      changePriority: 'Change priority',
+      deleteTask: 'Delete task',
+      priorityAria: 'Priority: {priority}. Tap to change.',
+      priorityMust: '★ must',
+      priorityShould: '◆ should',
+      priorityCould: '○ could',
+      mustBarLabel: '★ {done}/{total}',
+      allBarLabel: 'all {done}/{total}',
+      allDone: 'all done ✓',
+      doneCountShow: '{count} done · {action} to show',
+      doneCountHide: '{count} done · {action} to hide',
+      tap: 'tap',
+      click: 'click',
+      footerTouch: 'double tap to edit · swipe left to delete',
+      footerDesktop: '/ focus · click to edit · drag to reorder',
+      swipeHint: '← swipe left to delete',
+      emptyMust: 'What has to happen today?',
+      emptyShould: 'What would be good to do?',
+      emptyCould: 'What could you do if time allows?',
+      mustCapHint: 'You have {count} must{plural}. Be ruthless: what truly cannot wait?',
+      taskpadAllDoneTitle: 'Taskpad - all done ✓',
+      taskpadMustsLeftTitle: 'Taskpad - {count} must{plural} left',
+      taskpadTasksLeftTitle: 'Taskpad - {count} task{plural} left',
+      taskpadDefaultTitle: 'Taskpad',
+      syncConflictTitle: 'Sync conflict',
+      syncConflictMessage: 'This list changed on another device since this app last synced. Overwrite the remote list with the copy from this app?',
+      celebrationDone: 'yeah, you did it',
+      celebrationMust: 'musts handled',
+      dayComplete: 'DAY COMPLETE',
+      everythingDone: "everything's done",
+      movedUp: '{text} moved up',
+      movedDown: '{text} moved down',
+      sectionPriority: '{priority} priority',
+      selectTheKeyTextAbove: 'select the key text above',
+    },
+  };
+
+  function normalizeLocale(value) {
+    const raw = String(value ?? '').trim().toLowerCase();
+    if (raw.startsWith('en')) return 'en';
+    return 'en';
+  }
+
+  let locale = 'en';
+  try {
+    locale = normalizeLocale(localStorage.getItem(LOCALE_KEY) || navigator.language);
+  } catch {
+    locale = normalizeLocale(navigator.language);
+  }
+
+  function t(key, vars = {}) {
+    const table = STRINGS[locale] || STRINGS.en;
+    const template = table[key] ?? STRINGS.en[key] ?? key;
+    return String(template).replace(/\{(\w+)\}/g, (_, name) => `${vars[name] ?? ''}`);
+  }
+
+  function setLocale(nextLocale) {
+    locale = normalizeLocale(nextLocale);
+    try { localStorage.setItem(LOCALE_KEY, locale); } catch {}
+    try { document.documentElement.lang = locale; } catch {}
+  }
 
   const SYMBOLS = { must: '★', should: '◆', could: '○' };
   const PRIORITY_NEXT   = { must: 'should', should: 'could', could: 'must' };
-  const PRIORITY_LABELS = { must: '★ must', should: '◆ should', could: '○ could' };
+  const PRIORITY_LABELS = { must: t('priorityMust'), should: t('priorityShould'), could: t('priorityCould') };
+
+  function withPerfMark(name, fn) {
+    if (!PERF_ENABLED) return fn();
+    const t0 = performance.now();
+    const out = fn();
+    const dt = performance.now() - t0;
+    if (dt > 8) console.debug(`[perf] ${name}: ${dt.toFixed(2)}ms`);
+    return out;
+  }
 
   // Quick-route prefixes: typing /must or /m at start of input
   const ROUTE_MAP = {
@@ -49,17 +166,18 @@ import {
   const isAndroid = typeof window.TaskpadAndroid !== 'undefined';
   // isMobile: only true on real mobile browsers - never in Tauri or Android WebView bridge
   const isMobile  = !isTauri && !isAndroid && /Mobi|Android/i.test(navigator.userAgent);
+  const isTouchApp = isAndroid || isMobile;
 
-  // ─── State ───────────────────────────────────────────────────────────────
+  // State
   // { id, text, priority, done, createdAt, doneAt?, order? }
   let state = { tasks: [], nextId: 1, updatedAt: 0 };
 
-  // ─── Sync state ──────────────────────────────────────────────────────────
+  // Sync state
   let syncKey = null, syncTimer = null, syncInflight = false, syncDirty = false;
   let syncPendingPull = false;
   let syncLastSyncedAt = 0;
 
-  // ─── DOM refs ─────────────────────────────────────────────────────────────
+  // DOM refs
   const $ = id => document.getElementById(id);
   const bindingEl    = $('binding');
   const headerDate   = $('headerDate');
@@ -83,6 +201,8 @@ import {
   const setupCreateBtn  = $('setupCreateBtn');
   const setupConnectBtn = $('setupConnectBtn');
   const setupKeyInput   = $('setupKeyInput');
+  const setupLocalBtn   = document.getElementById('setupLocalBtn');
+  const setupConnectLabel = document.querySelector('.setup-connect-label');
   const keyDisplay      = $('keyDisplay');
   const keyValue        = $('keyValue');
   const keyCopyBtn      = $('keyCopyBtn');
@@ -101,6 +221,10 @@ import {
   const DONE_SUMS    = { must: $('doneSummaryMust'), should: $('doneSummaryShould'),  could: $('doneSummaryCould') };
   const SECTIONS     = { must: $('sectionMust'),     should: $('sectionShould'),      could: $('sectionCould') };
 
+  // Accessibility: announce helper
+  const A11Y_LIVE = $('a11yLive');
+  function announce(msg) { if (!A11Y_LIVE) return; A11Y_LIVE.textContent = ''; setTimeout(() => { A11Y_LIVE.textContent = msg; }, 50); }
+
   // Done-collapsed state per section
   const doneCollapsed = { must: false, should: false, could: false };
   let confirmResolve = null;
@@ -109,7 +233,50 @@ import {
   let queuedCelebration = null;
   let celebrationTimer = 0;
 
-  // ─── Persistence ─────────────────────────────────────────────────────────
+  function applyLocalizedChrome() {
+    try { document.documentElement.lang = locale; } catch {}
+    const titleEl = setupCreateBtn.querySelector('.setup-action-title');
+    const descEl = setupCreateBtn.querySelector('.setup-action-desc');
+    if (setupConnectLabel) setupConnectLabel.textContent = t('pasteSyncKey');
+    if (setupLocalBtn) setupLocalBtn.textContent = t('localOnly');
+    setupConnectBtn.textContent = t('connectExistingList');
+    if (titleEl) titleEl.textContent = t('setupNewListTitle');
+    if (descEl) descEl.textContent = t('setupNewListDesc');
+    if (keyCopyBtn) keyCopyBtn.textContent = t('copyToClipboard');
+    if (clearAllBtn) clearAllBtn.textContent = t('clearAll');
+    if (clearDoneBtn) clearDoneBtn.textContent = t('clearDone');
+    if (confirmTitle) confirmTitle.textContent = t('confirm');
+    if (confirmCancelBtn) confirmCancelBtn.textContent = t('cancel');
+    if (confirmOkBtn) confirmOkBtn.textContent = t('confirm');
+    if (swipeHint) swipeHint.textContent = t('swipeHint');
+    if (footerHint) footerHint.textContent = isTouchApp ? t('footerTouch') : t('footerDesktop');
+    EMPTIES.must.textContent = t('emptyMust');
+    EMPTIES.should.textContent = t('emptyShould');
+    EMPTIES.could.textContent = t('emptyCould');
+    PRIORITIES.forEach(p => {
+      try { SECTIONS[p]?.setAttribute('aria-label', t('sectionPriority', { priority: p })); } catch {}
+    });
+  }
+
+  function setSetupCreatePhase(phase) {
+    const titleEl = setupCreateBtn.querySelector('.setup-action-title');
+    const descEl = setupCreateBtn.querySelector('.setup-action-desc');
+    if (!titleEl || !descEl) return;
+    if (phase === 'creating') {
+      titleEl.textContent = t('creating');
+      descEl.textContent = t('connecting');
+      return;
+    }
+    if (phase === 'done') {
+      titleEl.textContent = t('done');
+      descEl.textContent = t('keySaved');
+      return;
+    }
+    titleEl.textContent = t('setupNewListTitle');
+    descEl.textContent = t('setupNewListDesc');
+  }
+
+  // Persistence
   function loadLocal() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -136,7 +303,7 @@ import {
     }
   }
 
-  // ─── Sync ────────────────────────────────────────────────────────────────
+  // Sync
   // Fallback URL used if config.json is missing or unreadable (e.g. first launch,
   // WebView2 asset fetch failure). Keeps the app functional without config.json.
 
@@ -303,21 +470,18 @@ import {
 
   window.addEventListener('online', () => { if (syncDirty) push(); });
 
-  // ─── Setup screen ─────────────────────────────────────────────────────────
+  // Setup screen
   // Keep setup flow in one button state machine: create, show key, dismiss.
   let createDone = false;
   let connectReplaceConfirmed = false;
 
   function resetSetupScreen() {
-    const titleEl = setupCreateBtn.querySelector('.setup-action-title');
-    const descEl  = setupCreateBtn.querySelector('.setup-action-desc');
     createDone = false;
     connectReplaceConfirmed = false;
     setupCreateBtn.disabled = false;
     setupConnectBtn.disabled = false;
-    setupConnectBtn.textContent = 'Connect existing list';
-    if (titleEl) titleEl.textContent = 'New list';
-    if (descEl)  descEl.textContent  = 'First time. Create a new list with a sync key.';
+    setupConnectBtn.textContent = t('connectExistingList');
+    setSetupCreatePhase('idle');
     keyDisplay.style.display = 'none';
     setupError.style.display = 'none';
     setupError.textContent = '';
@@ -354,10 +518,10 @@ import {
   }
 
   function confirmAction({
-    title = 'Confirm',
+    title = t('confirm'),
     message,
-    confirmLabel = 'Confirm',
-    cancelLabel = 'Cancel',
+    confirmLabel = t('confirm'),
+    cancelLabel = t('cancel'),
     danger = true,
   }) {
     if (confirmResolve) closeConfirmDialog(false);
@@ -386,11 +550,8 @@ import {
     }
 
     // Phase 1: create new list
-    const titleEl = setupCreateBtn.querySelector('.setup-action-title');
-    const descEl  = setupCreateBtn.querySelector('.setup-action-desc');
     setupCreateBtn.disabled = true;
-    if (titleEl) titleEl.textContent = 'Creating...';
-    if (descEl)  descEl.textContent  = 'Connecting to your Worker...';
+    setSetupCreatePhase('creating');
     setupError.style.display = 'none';
     try {
       const res = await fetch(`${workerUrl}/tasks/init`, { method: 'POST', signal: AbortSignal.timeout(8000) });
@@ -398,43 +559,41 @@ import {
       const { key } = await res.json();
       syncKey = key; localStorage.setItem(SYNC_KEY_STORE, key);
       keyValue.textContent = key; keyDisplay.style.display = 'block';
-      if (titleEl) titleEl.textContent = 'Done';
-      if (descEl)  descEl.textContent  = 'Key shown above. Save it, then click here.';
+      setSetupCreatePhase('done');
       setupCreateBtn.disabled = false;
       createDone = true; // next click will dismiss
     } catch (err) {
       console.error('Taskpad list creation failed:', err);
-      setupError.textContent = describeSyncError(err, 'Could not create a new synced list.');
+      setupError.textContent = describeSyncError(err, t('createListError'));
       setupError.style.display = 'block';
       setupCreateBtn.disabled = false;
-      if (titleEl) titleEl.textContent = 'New list';
-      if (descEl)  descEl.textContent  = 'First time. Create a new list with a sync key.';
+      setSetupCreatePhase('idle');
     }
   });
 
   keyCopyBtn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(keyValue.textContent);
-      keyCopyBtn.textContent = 'copied!';
-      setTimeout(() => { keyCopyBtn.textContent = 'copy to clipboard'; }, 2000);
-    } catch { keyCopyBtn.textContent = 'select the key text above'; }
+      keyCopyBtn.textContent = t('copied');
+      setTimeout(() => { keyCopyBtn.textContent = t('copyToClipboard'); }, 2000);
+    } catch { keyCopyBtn.textContent = t('selectKeyText'); }
   });
 
   setupConnectBtn.addEventListener('click', async () => {
     const key = normalizeSyncKey(setupKeyInput.value);
-    if (!isValidSyncKey(key)) { setupError.textContent = 'Key must be 64 hex characters.'; setupError.style.display = 'block'; return; }
-    if (!workerUrl) { setupError.textContent = 'No worker URL configured.'; setupError.style.display = 'block'; return; }
+    if (!isValidSyncKey(key)) { setupError.textContent = t('keyMustBe64Hex'); setupError.style.display = 'block'; return; }
+    if (!workerUrl) { setupError.textContent = t('noWorkerConfigured'); setupError.style.display = 'block'; return; }
     if (state.tasks.length > 0 && !connectReplaceConfirmed) {
       const ok = await confirmAction({
-        title: 'Replace local tasks',
-        message: 'Connecting will replace the tasks currently stored in this tray app with the remote list for this key.',
-        confirmLabel: 'Connect',
-        cancelLabel: 'Cancel',
+        title: t('replaceLocalTasksTitle'),
+        message: t('replaceLocalTasksMessage'),
+        confirmLabel: t('connect'),
+        cancelLabel: t('cancel'),
       });
       if (!ok) return;
       connectReplaceConfirmed = true;
     }
-    setupConnectBtn.disabled = true; setupConnectBtn.textContent = 'Connecting...';
+    setupConnectBtn.disabled = true; setupConnectBtn.textContent = t('connecting');
     setupError.style.display = 'none';
     try {
       const remote = await fetchRemoteState(key);
@@ -447,9 +606,9 @@ import {
     } catch (err) {
       console.error('Taskpad existing-key connect failed:', err);
       connectReplaceConfirmed = false;
-      setupError.textContent = describeSyncError(err, 'Unable to connect this device to that list.');
+      setupError.textContent = describeSyncError(err, t('connectListError'));
       setupError.style.display = 'block';
-      setupConnectBtn.disabled = false; setupConnectBtn.textContent = 'Connect existing list';
+      setupConnectBtn.disabled = false; setupConnectBtn.textContent = t('connectExistingList');
     }
   });
 
@@ -474,7 +633,7 @@ import {
     openSyncSettings('', syncKey ?? '');
   });
 
-  // ─── Rendering helpers ────────────────────────────────────────────────────
+  // Rendering helpers
   confirmCancelBtn.addEventListener('click', () => closeConfirmDialog(false));
   confirmOkBtn.addEventListener('click', () => closeConfirmDialog(true));
   confirmOverlay.addEventListener('click', e => {
@@ -504,7 +663,7 @@ import {
   }
 
   function renderDate() {
-    headerDate.textContent = new Date().toLocaleDateString('en-GB', {
+    headerDate.textContent = new Date().toLocaleDateString(locale, {
       weekday: 'short', day: 'numeric', month: 'short'
     }).toUpperCase();
   }
@@ -520,7 +679,7 @@ import {
     mustFill.style.width      = mPct + '%';
     mustFill.style.background = (mTotal > 0 && mDone === mTotal)
       ? 'var(--progress)' : '';
-    mustLabel.textContent = mTotal === 0 ? '-' : `★ ${mDone}/${mTotal}`;
+    mustLabel.textContent = mTotal === 0 ? '-' : t('mustBarLabel', { done: mDone, total: mTotal });
 
     // Total bar
     const all     = state.tasks;
@@ -528,7 +687,7 @@ import {
     const aTotal  = all.length;
     const aPct    = aTotal === 0 ? 0 : Math.round(aDone / aTotal * 100);
     totalFill.style.width = aPct + '%';
-    totalLabel.textContent = aTotal === 0 ? '-' : `all ${aDone}/${aTotal}`;
+    totalLabel.textContent = aTotal === 0 ? '-' : t('allBarLabel', { done: aDone, total: aTotal });
 
     const nextSnapshot = {
       mustComplete: mTotal > 0 && mDone === mTotal,
@@ -548,10 +707,12 @@ import {
       const mustUndone = state.tasks.filter(t => t.priority === 'must' && !t.done).length;
       const allUndone  = state.tasks.filter(t => !t.done).length;
       let tip;
-      if (allUndone === 0 && aTotal > 0) tip = 'Taskpad - all done ✓';
-      else if (mustUndone > 0) tip = `Taskpad - ${mustUndone} must${mustUndone > 1 ? 's' : ''} left`;
-      else if (allUndone > 0)  tip = `Taskpad - ${allUndone} task${allUndone > 1 ? 's' : ''} left`;
-      else                     tip = 'Taskpad';
+      const mustPlural = mustUndone === 1 ? '' : 's';
+      const taskPlural = allUndone === 1 ? '' : 's';
+      if (allUndone === 0 && aTotal > 0) tip = t('taskpadAllDoneTitle');
+      else if (mustUndone > 0) tip = t('taskpadMustsLeftTitle', { count: mustUndone, plural: mustPlural });
+      else if (allUndone > 0)  tip = t('taskpadTasksLeftTitle', { count: allUndone, plural: taskPlural });
+      else                     tip = t('taskpadDefaultTitle');
       window.__TAURI__?.core.invoke('update_tray_tooltip', { tooltip: tip }).catch(() => {});
     }
   }
@@ -617,7 +778,7 @@ import {
 
     const banner = document.createElement('div');
     banner.className = `celebration-banner ${kind}`;
-    banner.textContent = kind === 'all' ? 'yeah, you did it' : 'musts handled';
+    banner.textContent = kind === 'all' ? t('celebrationDone') : t('celebrationMust');
     appEl.appendChild(banner);
     setTimeout(() => banner.remove(), kind === 'all' ? 3200 : 3600);
     setTimeout(() => {
@@ -663,8 +824,8 @@ import {
     const center = document.createElement('div');
     center.className = 'celebration-center';
     center.innerHTML = `
-      <div class="celebration-center-main">DAY COMPLETE</div>
-      <div class="celebration-center-sub">everything's done</div>
+      <div class="celebration-center-main">${t('dayComplete')}</div>
+      <div class="celebration-center-sub">${t('everythingDone')}</div>
     `;
     appEl.appendChild(center);
     setTimeout(() => center.remove(), 6200);
@@ -743,7 +904,7 @@ import {
     const show = undone >= MUST_CAP;
     mustCapHint.classList.toggle('visible', show);
     if (show) {
-      mustCapHint.textContent = `You have ${undone} must${undone > 1 ? 's' : ''}. Be ruthless: what truly can't wait?`;
+      mustCapHint.textContent = t('mustCapHint', { count: undone, plural: undone === 1 ? '' : 's' });
     }
   }
 
@@ -757,7 +918,7 @@ import {
     const undone = tasks.filter(t => !t.done).length;
     const el = COUNTS[p];
     if (undone > 0) { el.textContent = `${undone} left`; el.classList.remove('all-done'); }
-    else if (tasks.length > 0) { el.textContent = 'all done ✓'; el.classList.add('all-done'); }
+    else if (tasks.length > 0) { el.textContent = t('allDone'); el.classList.add('all-done'); }
     else { el.textContent = ''; el.classList.remove('all-done'); }
   }
 
@@ -781,20 +942,24 @@ import {
 
     const collapsed = doneCollapsed[p];
     summary.classList.add('visible');
-    const action = (isMobile || isAndroid) ? 'tap' : 'click';
+    const action = (isMobile || isAndroid) ? t('tap') : t('click');
     summary.textContent = collapsed
-      ? `${doneEls.length} done · ${action} to show`
-      : `${doneEls.length} done · ${action} to hide`;
+      ? t('doneCountShow', { count: doneEls.length, action })
+      : t('doneCountHide', { count: doneEls.length, action });
 
     doneEls.forEach(el => { el.style.display = collapsed ? 'none' : ''; });
   }
 
-  // ─── Build task element ───────────────────────────────────────────────────
+  // Build task element
   function createTaskEl(task) {
     const li = document.createElement('li');
     li.className = `task-item ${task.priority}${task.done ? ' done' : ''}`;
     li.dataset.id = String(task.id);
-    li.classList.toggle('reorderable', !task.done && !isAndroid && !isMobile);
+    li.classList.toggle('reorderable', !task.done && !isTouchApp);
+    // Accessibility
+    li.tabIndex = 0;
+    li.setAttribute('role', 'listitem');
+    li.setAttribute('aria-grabbed', 'false');
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox'; checkbox.className = 'task-check';
@@ -804,8 +969,8 @@ import {
     const priorityBtn = document.createElement('button');
     priorityBtn.className = 'task-priority-btn';
     priorityBtn.textContent = SYMBOLS[task.priority];
-    priorityBtn.title = 'Change priority';
-    priorityBtn.setAttribute('aria-label', `Priority: ${task.priority}. Tap to change.`);
+    priorityBtn.title = t('changePriority');
+    priorityBtn.setAttribute('aria-label', t('priorityAria', { priority: task.priority }));
 
     const body = document.createElement('div');
     body.className = 'task-body';
@@ -815,7 +980,7 @@ import {
 
     const del = document.createElement('button');
     del.className = 'task-delete';
-    del.setAttribute('aria-label', 'Delete task');
+    del.setAttribute('aria-label', t('deleteTask'));
     del.textContent = '×';
 
     li.append(checkbox, priorityBtn, body, del);
@@ -824,29 +989,61 @@ import {
     del.addEventListener('click', e => { e.stopPropagation(); animateRemove(li, task.id); });
     priorityBtn.addEventListener('click', e => { e.stopPropagation(); changePriority(task.id, li, priorityBtn); });
 
-    // Click to edit (desktop) or long-press (mobile)
-    let pressTimer = null;
-    // Single click on body area starts edit - more natural than dblclick
+    // Desktop edits on click. Touch devices use double-tap so normal taps do not
+    // open the keyboard while scrolling or changing priority.
+    let editTapAt = 0;
+    let editTouchStartX = 0, editTouchStartY = 0, editTouchMoved = false;
     body.addEventListener('click', e => {
+      if (isTouchApp) return;
       if (dragJustFinished) return;
       if (li.classList.contains('done')) return;
       if (e.target.closest('.task-check') || e.target.closest('.task-delete') || e.target.closest('.task-priority-btn') || e.target.closest('.task-edit-input')) return;
       startEdit(task.id, li, span);
     });
-    // Block dblclick browser default (text selection) - click is handled above
-    span.addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); });
-    span.addEventListener('touchstart', () => {
-      pressTimer = setTimeout(() => startEdit(task.id, li, span), 600);
+    li.addEventListener('keydown', e => {
+      if ((e.altKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        const dir = e.key === 'ArrowUp' ? -1 : 1;
+        moveTaskWithinPriority(task.id, dir);
+        announce(dir === -1 ? t('movedUp', { text: task.text }) : t('movedDown', { text: task.text }));
+        setTimeout(() => { try { li.focus(); } catch(e) {} }, 40);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); document.getElementById('undoBtn')?.click(); }
+    });
+    span.addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); if (!isTouchApp) startEdit(task.id, li, span); });
+    body.addEventListener('touchstart', e => {
+      if (!isTouchApp) return;
+      if (e.touches.length !== 1) return;
+      editTouchStartX = e.touches[0].clientX;
+      editTouchStartY = e.touches[0].clientY;
+      editTouchMoved = false;
     }, { passive: true });
-    span.addEventListener('touchend', () => clearTimeout(pressTimer));
-    span.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true });
+    body.addEventListener('touchmove', e => {
+      if (!isTouchApp) return;
+      const t = e.touches[0];
+      if (!t) return;
+      editTouchMoved ||= Math.hypot(t.clientX - editTouchStartX, t.clientY - editTouchStartY) > TOUCH_MOVE_CANCEL_PX;
+    }, { passive: true });
+    body.addEventListener('touchend', e => {
+      if (!isTouchApp) return;
+      if (dragJustFinished || editTouchMoved || li.classList.contains('done')) return;
+      if (e.target.closest('.task-check') || e.target.closest('.task-delete') || e.target.closest('.task-priority-btn') || e.target.closest('.task-edit-input')) return;
+      const now = Date.now();
+      if (now - editTapAt < TOUCH_EDIT_DOUBLE_TAP_MS) {
+        e.preventDefault();
+        startEdit(task.id, li, span);
+        editTapAt = 0;
+      } else {
+        editTapAt = now;
+      }
+    });
 
-    // Drag and drop - desktop browsers only (not mobile/Android)
-    if (!task.done && !isAndroid && !isMobile) {
+    // Drag and drop uses mouse events for desktop reordering.
+    if (!task.done && !isTouchApp) {
       setupDrag(li, task.id);
     }
-    // Swipe-to-delete: Android and mobile web browsers
-    if (isAndroid || isMobile) setupSwipe(li, task.id);
+    // Swipe-to-delete: Android/mobile only, with thresholds that avoid scroll clashes.
+    if (isTouchApp) setupSwipe(li, task.id);
 
     return li;
   }
@@ -863,15 +1060,17 @@ import {
 
   // Full render - used after pull / state replacement
   function render() {
-    for (const p of PRIORITIES) {
-      LISTS[p].innerHTML = '';
-      sortedTasks(p).forEach(t => LISTS[p].appendChild(createTaskEl(t)));
-      updateDoneCollapse(p);
-    }
-    updateAllCounts();
-    updateProgress();
-    updateMustCapHint();
-    updateClearDone();
+    withPerfMark('render', () => {
+      for (const p of PRIORITIES) {
+        LISTS[p].innerHTML = '';
+        sortedTasks(p).forEach(t => LISTS[p].appendChild(createTaskEl(t)));
+        updateDoneCollapse(p);
+      }
+      updateAllCounts();
+      updateProgress();
+      updateMustCapHint();
+      updateClearDone();
+    });
 
     if ((isAndroid || isMobile) && state.tasks.length > 0 && !localStorage.getItem(SWIPE_SHOWN)) {
       swipeHint.style.display = 'block';
@@ -879,7 +1078,7 @@ import {
     }
   }
 
-  // ─── Mutations ───────────────────────────────────────────────────────────
+  // Mutations
   function addTask(text, priority) {
     const clean = text.trim();
     if (!clean) return;
@@ -908,7 +1107,7 @@ import {
     }
   }
 
-  // ─── Burst particle effect ───────────────────────────────────────────────
+  // Burst particle effect
   // Read accent colours from CSS tokens so burst matches any theme changes
   function getBurstColor(priority) {
     return getComputedStyle(document.documentElement)
@@ -946,7 +1145,7 @@ import {
     saveLocal(); schedulePush();
 
     li.classList.toggle('done', checked);
-    li.classList.toggle('reorderable', !checked && !isAndroid && !isMobile);
+    li.classList.toggle('reorderable', !checked && !isTouchApp);
 
     if (checked) {
       li.classList.add('completing');
@@ -973,7 +1172,7 @@ import {
     updateAllCounts(); updateProgress(); updateMustCapHint(); updateClearDone();
   }
 
-  // ─── Undo system ─────────────────────────────────────────────────────────
+  // Undo system
   // Undo is a re-add, not a soft-delete. Task is removed from state immediately
   // (survives panel close, sync, etc). Undo copies the task back in.
   let undoSnapshot = null;  // a copy of the deleted task
@@ -1059,6 +1258,21 @@ import {
     }));
   }
 
+  function moveTaskWithinPriority(id, direction) {
+    const task = state.tasks.find(t => t.id === id);
+    if (!task || task.done) return;
+
+    const result = moveWithinPriority(state.tasks, id, direction);
+    if (!result.moved) return;
+
+    saveLocal();
+    schedulePush();
+
+    LISTS[task.priority].innerHTML = '';
+    sortedTasks(task.priority).forEach(t => LISTS[task.priority].appendChild(createTaskEl(t)));
+    updateDoneCollapse(task.priority);
+  }
+
   function editTask(id, newText) {
     const task = state.tasks.find(t => t.id === id);
     if (!task || !newText.trim()) return;
@@ -1132,7 +1346,7 @@ import {
     render();
   }
 
-  // ─── Edit in place ────────────────────────────────────────────────────────
+  // Edit in place
   function startEdit(id, li, span) {
     if (li.classList.contains('done')) return;
     if (li.querySelector('.task-edit-input')) return; // already editing
@@ -1166,7 +1380,7 @@ import {
     input.addEventListener('blur', commit);
   }
 
-  // ─── Animated remove ──────────────────────────────────────────────────────
+  // Animated remove
   function animateRemove(li, id) {
     // Set undo snapshot immediately so undo works even during the exit animation
     const task = state.tasks.find(t => t.id === id);
@@ -1190,25 +1404,9 @@ import {
     }, 260);
   }
 
-  // ─── Drag and drop ────────────────────────────────────────────────────────
-  // Architecture: ONE global pointer system. Global move/up/cancel listeners
-  // are attached ONCE in initDrag() - never per task element.
-  // Uses MOUSE events, not pointer events.
-  //
-  // Root cause of all previous failures: pointer events (pointermove/pointerup)
-  // are intercepted by WebView2's scroll-gesture engine when the cursor moves
-  // inside a scrollable container - even with touch-action:none set on the
-  // dragged element. This is a known WebView2/Chromium behaviour that cannot
-  // be worked around with CSS or setPointerCapture alone.
-  //
-  // Mouse events (mousemove/mouseup) on document are NOT subject to scroll
-  // interception. They always fire unconditionally in Chromium/WebView2.
-  // This is the correct approach for a desktop-only Tauri app.
-  //
-  // Architecture:
-  //   mousedown on task el  → arm drag, record start pos
-  //   mousemove on document → once 4px threshold crossed, activate + show indicators
-  //   mouseup  on document  → commit drop
+  // Drag and drop
+  // Mouse events are used here because pointer events are unreliable in the
+  // embedded WebView when dragging inside scrollable content.
   let dragId           = null;
   let dragEl           = null;
   let dragGhostEl      = null;
@@ -1216,8 +1414,14 @@ import {
   let dragStartY       = 0;
   let dragOffsetX      = 0;
   let dragOffsetY      = 0;
+  let dragLastX        = 0;
+  let dragLastY        = 0;
+  let dragDropPriority = null;
   let dragArmed        = false;  // mousedown fired, waiting for movement threshold
   let dragJustFinished = false;  // suppresses click-to-edit after a successful drop
+  let dragMoveRafQueued = false;
+  let dragMoveNextX = 0;
+  let dragMoveNextY = 0;
 
   function initDrag() {
     document.addEventListener('mousemove', onDragMove);
@@ -1279,6 +1483,115 @@ import {
     });
   }
 
+  function resolveDropTarget(clientX, clientY) {
+    let dropP = null;
+    const hit = document.elementFromPoint(clientX, clientY)?.closest?.('.section-block');
+    if (hit) dropP = PRIORITIES.find(p => SECTIONS[p] === hit) ?? null;
+
+    if (!dropP) {
+      let closest = null, closestDistance = Infinity;
+      for (const p of PRIORITIES) {
+        const rect = SECTIONS[p].getBoundingClientRect();
+        if (clientY >= rect.top - 28 && clientY <= rect.bottom + 28) {
+          dropP = p;
+          break;
+        }
+        const distance = clientY < rect.top ? rect.top - clientY : clientY - rect.bottom;
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closest = p;
+        }
+      }
+      dropP ??= closest;
+    }
+
+    if (!dropP) return { dropP: null, insertBeforeEl: null, insertAfterEl: null };
+
+    const items = [...LISTS[dropP].querySelectorAll('.task-item:not(.done):not(.dragging):not(.drag-placeholder)')];
+    let nearest = null, nearestDist = Infinity;
+    items.forEach(item => {
+      const rect = item.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      const dist = Math.abs(clientY - mid);
+      if (dist < nearestDist) {
+        nearest = { item, above: clientY < mid };
+        nearestDist = dist;
+      }
+    });
+
+    return {
+      dropP,
+      insertBeforeEl: nearest?.above ? nearest.item : null,
+      insertAfterEl: nearest && !nearest.above ? nearest.item : null,
+    };
+  }
+
+  function activateDrag(clientX, clientY) {
+    dragLastX = clientX;
+    dragLastY = clientY;
+    dragArmed = false;
+    if (dragEl) {
+      dragEl.classList.add('dragging', 'drag-placeholder');
+      dragGhostEl = createDragGhost(dragEl);
+      positionDragGhost(clientX, clientY);
+    }
+    document.body.style.cursor     = 'grabbing';
+    document.body.style.userSelect = 'none';
+  }
+
+  function moveDragPlaceholder(dropP, insertBeforeEl, insertAfterEl) {
+    if (!dragEl || !dropP) return;
+    const list = LISTS[dropP];
+    if (insertBeforeEl) {
+      list.insertBefore(dragEl, insertBeforeEl);
+    } else if (insertAfterEl) {
+      list.insertBefore(dragEl, insertAfterEl.nextSibling);
+    } else {
+      const firstDone = list.querySelector('.task-item.done');
+      firstDone ? list.insertBefore(dragEl, firstDone) : list.appendChild(dragEl);
+    }
+    dragDropPriority = dropP;
+  }
+
+  function getPlaceholderDropTarget() {
+    if (!dragEl) return { dropP: null, insertBeforeEl: null, insertAfterEl: null };
+    const list = dragEl.parentElement;
+    const dropP = PRIORITIES.find(p => LISTS[p] === list) ?? dragDropPriority;
+    if (!dropP) return { dropP: null, insertBeforeEl: null, insertAfterEl: null };
+
+    const prev = dragEl.previousElementSibling;
+    const next = dragEl.nextElementSibling;
+    return {
+      dropP,
+      insertBeforeEl: next?.matches?.('.task-item:not(.done)') ? next : null,
+      insertAfterEl: prev?.matches?.('.task-item:not(.done)') ? prev : null,
+    };
+  }
+
+  function updateDragPosition(clientX, clientY) {
+    if (!dragEl || dragId === null) return;
+    dragLastX = clientX;
+    dragLastY = clientY;
+    positionDragGhost(clientX, clientY);
+    autoScrollWhileDragging(clientY);
+    clearDragIndicators();
+    const { dropP, insertBeforeEl, insertAfterEl } = resolveDropTarget(clientX, clientY);
+    if (!dropP) return;
+    moveDragPlaceholder(dropP, insertBeforeEl, insertAfterEl);
+    SECTIONS[dropP].classList.add('drop-active');
+  }
+
+  function queueDragPosition(clientX, clientY) {
+    dragMoveNextX = clientX;
+    dragMoveNextY = clientY;
+    if (dragMoveRafQueued) return;
+    dragMoveRafQueued = true;
+    requestAnimationFrame(() => {
+      dragMoveRafQueued = false;
+      updateDragPosition(dragMoveNextX, dragMoveNextY);
+    });
+  }
+
   function onDragMove(e) {
     if (!dragArmed && dragId === null) return;
 
@@ -1287,63 +1600,48 @@ import {
       const dx = e.clientX - dragStartX;
       const dy = e.clientY - dragStartY;
       if (Math.hypot(dx, dy) < 4) return;
-      // Threshold crossed - activate drag
-      dragArmed = false;
-      if (dragEl) {
-        dragEl.classList.add('dragging', 'drag-placeholder');
-        dragGhostEl = createDragGhost(dragEl);
-        positionDragGhost(e.clientX, e.clientY);
-      }
-      document.body.style.cursor     = 'grabbing';
-      document.body.style.userSelect = 'none';
+      activateDrag(e.clientX, e.clientY);
     }
 
-    // Phase 2: actively dragging - update drop indicators
-    if (!dragEl || dragId === null) return;
-    positionDragGhost(e.clientX, e.clientY);
-    autoScrollWhileDragging(e.clientY);
-    clearDragIndicators();
-    for (const p of PRIORITIES) {
-      const rect = SECTIONS[p].getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        SECTIONS[p].classList.add('drop-active');
-        const items = [...LISTS[p].querySelectorAll('.task-item:not(.done):not(.dragging):not(.drag-placeholder)')];
-        let nearest = null, nearestDist = Infinity;
-        items.forEach(item => {
-          const ir  = item.getBoundingClientRect();
-          const mid = ir.top + ir.height / 2;
-          const dist = Math.abs(e.clientY - mid);
-          if (dist < nearestDist) { nearestDist = dist; nearest = { item, above: e.clientY < mid }; }
-        });
-        if (nearest) nearest.item.classList.add(nearest.above ? 'insert-before' : 'insert-after');
-        break;
-      }
-    }
+    queueDragPosition(e.clientX, e.clientY);
   }
 
-  function onDragUp() {
+  function finishDrag() {
     // Always restore cursor and selection, regardless of drag state
     document.body.style.cursor     = '';
     document.body.style.userSelect = '';
+    listArea.style.touchAction = '';
 
     // Mouse pressed but never crossed threshold - disarm cleanly, allow click
     if (dragArmed) {
       dragArmed = false;
       dragId    = null;
       dragEl    = null;
+      dragDropPriority = null;
       destroyDragGhost();
+      clearDragIndicators();
       return;
     }
 
-    if (dragId === null || !dragEl) return;
+    if (dragId === null || !dragEl) {
+      dragDropPriority = null;
+      destroyDragGhost();
+      clearDragIndicators();
+      return;
+    }
 
-    let dropP = null, insertBeforeEl = null, insertAfterEl = null;
-    for (const p of PRIORITIES) {
-      if (SECTIONS[p].classList.contains('drop-active')) {
-        dropP          = p;
-        insertBeforeEl = SECTIONS[p].querySelector('.task-item.insert-before');
-        insertAfterEl  = SECTIONS[p].querySelector('.task-item.insert-after');
-        break;
+    let { dropP, insertBeforeEl, insertAfterEl } = getPlaceholderDropTarget();
+    if (!dropP) {
+      ({ dropP, insertBeforeEl, insertAfterEl } = resolveDropTarget(dragLastX, dragLastY));
+    }
+    if (!dropP) {
+      for (const p of PRIORITIES) {
+        if (SECTIONS[p].classList.contains('drop-active')) {
+          dropP          = p;
+          insertBeforeEl = SECTIONS[p].querySelector('.task-item.insert-before');
+          insertAfterEl  = SECTIONS[p].querySelector('.task-item.insert-after');
+          break;
+        }
       }
     }
 
@@ -1351,51 +1649,24 @@ import {
     dragEl.classList.remove('dragging', 'drag-placeholder');
     destroyDragGhost();
     clearDragIndicators();
-    dragId = null; dragEl = null;
+    dragId = null; dragEl = null; dragDropPriority = null;
     dragJustFinished = true;
-    setTimeout(() => { dragJustFinished = false; }, 300);
+    setTimeout(() => { dragJustFinished = false; }, 420);
     if (dropP) commitDrop(dropP, id, insertBeforeEl, insertAfterEl);
   }
 
-  // ── commitDrop ─────────────────────────────────────────────────────────────
+  function onDragUp() {
+    finishDrag();
+  }
+
+  // commitDrop
   function commitDrop(p, id, insertBeforeEl, insertAfterEl) {
     const task = state.tasks.find(t => t.id === id);
     if (!task) return;
     const oldP = task.priority;
-    task.priority = p;
-
-    const undoneEls = [...LISTS[p].querySelectorAll('.task-item:not(.done):not(.dragging):not(.drag-placeholder)')];
-    const undone = undoneEls
-      .map(el => state.tasks.find(t => t.id === parseInt(el.dataset.id, 10)))
-      .filter(t => t && t.id !== id);
-    const orderKey = t => t.order ?? t.createdAt;
-
-    if (insertBeforeEl) {
-      const ref = state.tasks.find(t => t.id === parseInt(insertBeforeEl.dataset.id, 10));
-      if (ref) {
-        const refIdx = undone.indexOf(ref);
-        const prev   = refIdx > 0 ? undone[refIdx - 1] : null;
-        task.order   = prev ? (orderKey(prev) + orderKey(ref)) / 2 : orderKey(ref) - 1;
-      }
-    } else if (insertAfterEl) {
-      const ref = state.tasks.find(t => t.id === parseInt(insertAfterEl.dataset.id, 10));
-      if (ref) {
-        const refIdx = undone.indexOf(ref);
-        const next   = refIdx < undone.length - 1 ? undone[refIdx + 1] : null;
-        task.order   = next ? (orderKey(ref) + orderKey(next)) / 2 : orderKey(ref) + 1;
-      }
-    } else if (undone.length > 0) {
-      task.order = orderKey(undone[undone.length - 1]) + 1;
-    } else {
-      task.order = 1;
-    }
-
-    // Renormalise if floating point gap gets too dense
-    const allUndone = state.tasks.filter(t => t.priority === p && !t.done)
-      .sort((a, b) => orderKey(a) - orderKey(b));
-    const minGap = allUndone.slice(1).reduce((min, t, i) =>
-      Math.min(min, orderKey(t) - orderKey(allUndone[i])), Infinity);
-    if (minGap < 0.01) allUndone.forEach((t, i) => { t.order = (i + 1) * 100; });
+    const insertBeforeId = insertBeforeEl ? parseInt(insertBeforeEl.dataset.id, 10) : null;
+    const insertAfterId = insertAfterEl ? parseInt(insertAfterEl.dataset.id, 10) : null;
+    withPerfMark('drop-ordering', () => applyDropOrdering(state.tasks, p, id, insertBeforeId, insertAfterId));
 
     saveLocal(); schedulePush();
 
@@ -1420,20 +1691,24 @@ import {
       .forEach(el => el.classList.remove('insert-before', 'insert-after', 'drop-active'));
   }
 
-  // ─── Swipe to delete (touch) ──────────────────────────────────────────────
+  // Swipe to delete (touch)
   function setupSwipe(el, id) {
     let startX = 0, startY = 0, dx = 0, axis = null;
+    const vibrate = pattern => {
+      try { if (navigator?.vibrate) navigator.vibrate(pattern); } catch (e) { /* noop */ }
+    };
 
     el.addEventListener('touchstart', e => {
       startX = e.touches[0].clientX; startY = e.touches[0].clientY;
       dx = 0; axis = null; el.style.transition = '';
+      el.classList.add('touch-primed');
     }, { passive: true });
 
     el.addEventListener('touchmove', e => {
       const mx = e.touches[0].clientX - startX;
       const my = e.touches[0].clientY - startY;
-      if (axis === null && Math.hypot(mx, my) >= 5)
-        axis = Math.abs(mx) > Math.abs(my) ? 'h' : 'v';
+      if (axis === null && Math.hypot(mx, my) >= SWIPE_AXIS_THRESHOLD_PX)
+        axis = Math.abs(mx) > Math.abs(my) * SWIPE_HORIZONTAL_DOMINANCE ? 'h' : 'v';
       if (axis !== 'h') return;
       e.preventDefault();
       dx = Math.min(0, mx);
@@ -1441,8 +1716,9 @@ import {
     }, { passive: false });
 
     const onEnd = () => {
-      if (axis !== 'h') { axis = null; return; }
-      if (Math.abs(dx) >= el.offsetWidth * 0.42) {
+      if (axis !== 'h') { axis = null; el.classList.remove('touch-primed'); return; }
+      if (Math.abs(dx) >= el.offsetWidth * SWIPE_DELETE_RATIO) {
+        vibrate(10);
         el.style.transition = 'transform 0.2s var(--ease-out)';
         el.style.transform = `translateX(-${el.offsetWidth}px)`;
         setTimeout(() => animateRemove(el, id), 200);
@@ -1450,6 +1726,7 @@ import {
         el.style.transition = 'transform 0.25s var(--ease-out)';
         el.style.transform = '';
       }
+      el.classList.remove('touch-primed');
       axis = null;
     };
 
@@ -1457,10 +1734,11 @@ import {
     el.addEventListener('touchcancel', () => {
       el.style.transition = 'transform 0.25s var(--ease-out)';
       el.style.transform = ''; axis = null;
+      el.classList.remove('touch-primed');
     });
   }
 
-  // ─── Done section collapse ────────────────────────────────────────────────
+  // Done section collapse
   PRIORITIES.forEach(p => {
     DONE_SUMS[p].addEventListener('click', () => {
       doneCollapsed[p] = !doneCollapsed[p];
@@ -1470,7 +1748,7 @@ import {
     });
   });
 
-  // ─── Add row ──────────────────────────────────────────────────────────────
+  // Add row
   let addP = 'must';
 
   function setAddPriority(p) {
@@ -1480,7 +1758,10 @@ import {
     addSubmit.dataset.p     = p;
   }
 
-  addPriority.addEventListener('click', () => { setAddPriority(PRIORITY_NEXT[addP]); addInput.focus(); });
+  addPriority.addEventListener('click', () => {
+    setAddPriority(PRIORITY_NEXT[addP]);
+    if (!isTouchApp) addInput.focus();
+  });
 
   addInput.addEventListener('input', () => {
     addSubmit.classList.toggle('visible', addInput.value.trim().length > 0);
@@ -1505,7 +1786,8 @@ import {
         setAddPriority(prio);
         addInput.value = '';
         addSubmit.classList.remove('visible');
-        addInput.focus();
+        if (isTouchApp) addInput.blur();
+        else addInput.focus();
         return;
       }
       if (lower.startsWith(prefix + ' ')) {
@@ -1520,7 +1802,8 @@ import {
     addInput.value = '';
     addSubmit.classList.remove('visible');
     setAddPriority(priority); // keep priority for rapid-fire adds
-    addInput.focus();
+    if (isTouchApp) addInput.blur();
+    else addInput.focus();
   }
 
   addInput.addEventListener('keydown', e => {
@@ -1553,26 +1836,44 @@ import {
     }
   });
 
-  // ─── Platform footer hint ─────────────────────────────────────────────────
+  // Platform footer hint
   // Swipe hint is only valid on Android. All other contexts get the desktop hint.
-  if (isAndroid || isMobile) {
-    footerHint.textContent = 'tap text to edit · tap ★ to reprioritise · swipe to delete';
+  if (isAndroid) {
+    footerHint.textContent = t('footerTouch');
   } else {
     swipeHint.remove();
-    footerHint.textContent = '/ focus · click to edit · drag to reorder';
+    footerHint.textContent = t('footerDesktop');
   }
 
-  // ─── Midnight ─────────────────────────────────────────────────────────────
+  // Midnight
   function scheduleMidnight() {
     const now = new Date();
     const ms = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
     setTimeout(() => { renderDate(); scheduleMidnight(); }, ms);
   }
 
-  // ─── Init ─────────────────────────────────────────────────────────────────
+  // Init
   async function init() {
     await loadRuntimeConfig();
     initDrag(); renderBinding(); renderDate(); loadLocal();
+    applyLocalizedChrome();
+    window.TaskpadLocale = {
+      get: () => locale,
+      set: value => {
+        setLocale(value);
+        applyLocalizedChrome();
+        renderDate();
+      },
+    };
+    // Accessibility: expose list roles and section labels
+    PRIORITIES.forEach(p => {
+      try { LISTS[p]?.setAttribute('role', 'list'); } catch(e) {}
+      try { SECTIONS[p]?.setAttribute('aria-label', t('sectionPriority', { priority: p })); } catch(e) {}
+    });
+    // Header undo helper
+    const hUndo = document.getElementById('headerUndoBtn');
+    if (hUndo) { hUndo.style.display = ''; hUndo.addEventListener('click', () => document.getElementById('undoBtn')?.click()); }
+    document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { const b = document.getElementById('undoBtn'); if (b) { e.preventDefault(); b.click(); } } });
     const savedKey = localStorage.getItem(SYNC_KEY_STORE);
     if (workerUrl) {
       if (savedKey) {
