@@ -1038,6 +1038,9 @@ import {
       }
     });
 
+    if (!task.done && isTouchApp) {
+      setupTouchDrag(li, task.id);
+    }
     // Drag and drop uses mouse events for desktop reordering.
     if (!task.done && !isTouchApp) {
       setupDrag(li, task.id);
@@ -1422,6 +1425,9 @@ import {
   let dragMoveRafQueued = false;
   let dragMoveNextX = 0;
   let dragMoveNextY = 0;
+  let dragTargetPriority = null;
+  let dragTargetBeforeEl = null;
+  let dragTargetAfterEl = null;
 
   function initDrag() {
     document.addEventListener('mousemove', onDragMove);
@@ -1436,6 +1442,8 @@ import {
     clone.classList.remove('dragging', 'drag-placeholder', 'insert-before', 'insert-after');
     ghost.appendChild(clone);
     document.body.appendChild(ghost);
+    // Ensure the ghost does not intercept pointer events or elementFromPoint
+    try { ghost.style.pointerEvents = 'none'; } catch (e) {}
     return ghost;
   }
 
@@ -1481,6 +1489,105 @@ import {
       // (unlike pointerdown preventDefault, which does - a previous source of bugs).
       e.preventDefault();
     });
+  }
+
+  function setupTouchDrag(el, id) {
+    let touchId = null;
+    let startX = 0;
+    let startY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let active = false;
+    let holdTimer = null;
+
+    // Prevent native long-press behaviors from stealing the touch sequence.
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    el.addEventListener('dragstart', e => e.preventDefault());
+
+    const clearHold = () => {
+      if (holdTimer !== null) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    };
+
+    const reset = () => {
+      clearHold();
+      el.classList.remove('touch-primed');
+      touchId = null;
+      active = false;
+    };
+
+    const startActiveDrag = () => {
+      if (active || touchId === null) return;
+      const rect = el.getBoundingClientRect();
+      dragStartX = lastX;
+      dragStartY = lastY;
+      dragOffsetX = lastX - rect.left;
+      dragOffsetY = lastY - rect.top;
+      dragArmed = false;
+      dragId = id;
+      dragEl = el;
+      active = true;
+      el.classList.remove('touch-primed');
+      dragEl.classList.add('touch-dragging');
+      vibrate(12);
+      activateDrag(lastX, lastY);
+    };
+
+    el.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      if (e.target.closest('.task-check, .task-delete, .task-priority-btn, .task-edit-input')) return;
+      const touch = e.touches[0];
+      touchId = touch.identifier;
+      startX = lastX = touch.clientX;
+      startY = lastY = touch.clientY;
+      active = false;
+      el.classList.add('touch-primed');
+      clearHold();
+      holdTimer = setTimeout(startActiveDrag, TOUCH_DRAG_HOLD_MS);
+    }, { passive: true });
+
+    el.addEventListener('touchmove', e => {
+      if (touchId === null) return;
+      const touch = [...e.touches].find(t => t.identifier === touchId) ?? e.touches[0];
+      if (!touch) return;
+      lastX = touch.clientX;
+      lastY = touch.clientY;
+
+      if (!active) {
+        if (Math.hypot(lastX - startX, lastY - startY) > TOUCH_DRAG_CANCEL_PX) {
+          reset();
+        }
+        return;
+      }
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      queueDragPosition(lastX, lastY);
+    }, { passive: false });
+
+    const endTouch = e => {
+      if (touchId === null) return;
+      const touch = [...e.changedTouches].find(t => t.identifier === touchId) ?? null;
+
+      if (touch) {
+        lastX = touch.clientX;
+        lastY = touch.clientY;
+      }
+
+      if (active) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        // Force one final target update at the finger-up point.
+        updateDragPosition(lastX, lastY);
+        finishDrag();
+      }
+      reset();
+    };
+
+    el.addEventListener('touchend', endTouch, { passive: false });
+    el.addEventListener('touchcancel', endTouch, { passive: false });
   }
 
   function resolveDropTarget(clientX, clientY) {
@@ -1530,11 +1637,16 @@ import {
     dragLastX = clientX;
     dragLastY = clientY;
     dragArmed = false;
+    dragTargetPriority = null;
+    dragTargetBeforeEl = null;
+    dragTargetAfterEl = null;
     if (dragEl) {
       dragEl.classList.add('dragging', 'drag-placeholder');
       dragGhostEl = createDragGhost(dragEl);
       positionDragGhost(clientX, clientY);
     }
+    // Prevent native touch scrolling while dragging
+    try { listArea.style.touchAction = 'none'; } catch (e) {}
     document.body.style.cursor     = 'grabbing';
     document.body.style.userSelect = 'none';
   }
@@ -1576,7 +1688,15 @@ import {
     autoScrollWhileDragging(clientY);
     clearDragIndicators();
     const { dropP, insertBeforeEl, insertAfterEl } = resolveDropTarget(clientX, clientY);
-    if (!dropP) return;
+    if (!dropP) {
+      dragTargetPriority = null;
+      dragTargetBeforeEl = null;
+      dragTargetAfterEl = null;
+      return;
+    }
+    dragTargetPriority = dropP;
+    dragTargetBeforeEl = insertBeforeEl;
+    dragTargetAfterEl = insertAfterEl;
     moveDragPlaceholder(dropP, insertBeforeEl, insertAfterEl);
     SECTIONS[dropP].classList.add('drop-active');
   }
@@ -1630,7 +1750,14 @@ import {
       return;
     }
 
-    let { dropP, insertBeforeEl, insertAfterEl } = getPlaceholderDropTarget();
+    // Prefer the last resolved target from drag-move updates.
+    let dropP = dragTargetPriority;
+    let insertBeforeEl = dragTargetBeforeEl;
+    let insertAfterEl = dragTargetAfterEl;
+
+    if (!dropP) {
+      ({ dropP, insertBeforeEl, insertAfterEl } = getPlaceholderDropTarget());
+    }
     if (!dropP) {
       ({ dropP, insertBeforeEl, insertAfterEl } = resolveDropTarget(dragLastX, dragLastY));
     }
@@ -1650,6 +1777,9 @@ import {
     destroyDragGhost();
     clearDragIndicators();
     dragId = null; dragEl = null; dragDropPriority = null;
+    dragTargetPriority = null;
+    dragTargetBeforeEl = null;
+    dragTargetAfterEl = null;
     dragJustFinished = true;
     setTimeout(() => { dragJustFinished = false; }, 420);
     if (dropP) commitDrop(dropP, id, insertBeforeEl, insertAfterEl);
