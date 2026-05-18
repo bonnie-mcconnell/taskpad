@@ -2,7 +2,7 @@
 
 A notebook-style task manager I built for myself. Lives in the Windows system tray, works as a PWA on mobile, and has an Android app wrapper - all running the same frontend, synced via a Cloudflare Worker.
 
-![screenshot or gif here]
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9e4fdcca-6851-45a7-8140-28ec0a891148" />
 
 ## What it is
 
